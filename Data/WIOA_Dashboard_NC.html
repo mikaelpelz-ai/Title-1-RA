@@ -236,6 +236,17 @@ body{font-family:var(--sans);background:var(--bg);color:var(--ink);min-height:10
   .chart-grid-2,.chart-grid-3{grid-template-columns:1fr}
   .chart-card.wide{grid-column:span 1}
 }
+/* County multi-select */
+.county-multiselect{position:relative;display:inline-block}
+.county-ms-btn{text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px;cursor:pointer}
+.county-ms-dropdown{display:none;position:absolute;top:calc(100% + 4px);left:0;z-index:200;background:#fff;border:1px solid #C7D8E8;border-radius:8px;box-shadow:0 6px 20px rgba(15,42,69,.15);min-width:230px;max-height:280px;overflow-y:auto;padding:4px 0}
+.county-ms-item{display:flex;align-items:center;gap:9px;padding:7px 14px;cursor:pointer;font-size:0.83rem;font-family:var(--sans);color:var(--navy);transition:background .1s}
+.county-ms-item:hover{background:#EEF5FB}
+.county-ms-item input[type=checkbox]{accent-color:var(--steel);cursor:pointer;flex-shrink:0}
+.county-ms-divider{height:1px;background:var(--rule);margin:4px 0}
+.county-tag{display:inline-flex;align-items:center;gap:5px;padding:3px 8px 3px 10px;border-radius:100px;background:var(--steel);font-family:var(--mono);font-size:0.68rem;font-weight:500;color:#fff;white-space:nowrap}
+.county-tag-remove{background:rgba(255,255,255,0.3);border:none;border-radius:100px;width:15px;height:15px;display:flex;align-items:center;justify-content:center;font-size:0.6rem;cursor:pointer;color:#fff;padding:0;line-height:1}
+.county-tag-remove:hover{background:rgba(255,255,255,0.55)}
 </style>
 </head>
 <body>
@@ -284,10 +295,12 @@ body{font-family:var(--sans);background:var(--bg);color:var(--ink);min-height:10
     </div>
     <div class="filter-group" id="filter-group-county" style="display:none">
       <div class="filter-label">County</div>
-      <select class="filter-select" id="rapids-filter-county" onchange="renderRapids()">
-        <option value="All">All Counties</option>
-      </select>
+      <div class="county-multiselect" id="county-multiselect">
+        <button class="filter-select county-ms-btn" id="county-ms-trigger" type="button" onclick="toggleCountyDropdown(event)">All Counties &#9662;</button>
+        <div class="county-ms-dropdown" id="county-ms-dropdown"></div>
+      </div>
     </div>
+    <div id="county-tags" style="display:none;align-items:center;flex-wrap:wrap;gap:6px;align-self:flex-end;padding-bottom:2px"></div>
     <div class="filter-group" id="filter-group-area">
       <div class="filter-label">Local Area / Board <sup style="font-size:0.65em;vertical-align:super;line-height:0">1</sup></div>
       <select class="filter-select" id="filter-area" onchange="render()">
@@ -872,16 +885,14 @@ function init() {
   updateAreaDD('cmp-area-inline', 'All', 'All');
   updateRapidsCountyDropdown();
 
-  function updateRapidsCountyDropdown(/* params */) {
-  // your implementation here
-}
-  
-  // Add event listener to update county dropdown when state changes
-  const stateFilter = document.getElementById('filter-state');
-  if (stateFilter) {
-    stateFilter.addEventListener('change', updateRapidsCountyDropdown);
-  }
-  
+  // Close county dropdown when clicking outside
+  document.addEventListener('click', function(e) {
+    if (!e.target.closest('#county-multiselect')) {
+      const dd = document.getElementById('county-ms-dropdown');
+      if (dd) dd.style.display = 'none';
+    }
+  });
+
   restoreFilters();
   renderTags();
   render();
@@ -941,9 +952,11 @@ function clearFilters() {
     const el = document.getElementById(id);
     if (el) { el.value = 'All'; markActive(el); }
   });
-  // Also reset county filter
-  const countyEl = document.getElementById('rapids-filter-county');
-  if (countyEl) { countyEl.value = 'All'; }
+  // Also reset county multi-select
+  document.querySelectorAll('#county-ms-dropdown .county-cb').forEach(cb => {
+    cb.checked = cb.value === '__all__';
+  });
+  updateCountyTriggerLabel();
   updateAreaDD('filter-area', 'All', 'NC');
   updateRapidsCountyDropdown();
   render();
@@ -1463,10 +1476,10 @@ function renderCompare(f) {
     type:'line',
     plugins:[ChartDataLabels],
     data:{ labels:labels, datasets:[
-      { label:labelA, data:aggA.map(m=>m.total>0?(m.ra/m.total*100).toFixed(3):0), borderColor:'#0F2A45', backgroundColor:'rgba(15,42,69,0.06)', tension:.3, pointRadius:4, borderWidth:2 },
+      { label:labelA, data:aggA.map(m=>m.total>0?Math.round(m.ra/m.total*10000)/100:0), borderColor:'#0F2A45', backgroundColor:'rgba(15,42,69,0.06)', tension:.3, pointRadius:4, borderWidth:2 },
       ...cmpData.map(c => ({
         label: c.label,
-        data:  c.byPY.map(m=>m.total>0?(m.ra/m.total*100).toFixed(3):0),
+        data:  c.byPY.map(m=>m.total>0?Math.round(m.ra/m.total*10000)/100:0),
         borderColor: c.color, backgroundColor: c.color+'22',
         tension:.3, pointRadius:4, borderWidth:2, fill:false
       })),
@@ -1623,8 +1636,9 @@ function setPage(id, btn) {
   document.getElementById('compare-toggle').style.display = id === 'compare' ? '' : 'none';
   // Hide year/quarter filters on Trend, RAPIDS, and Compare pages
   document.getElementById('filter-row-py-qtr').style.display = (id === 'trend' || id === 'rapids' || id === 'compare') ? 'none' : 'flex';
-  // Show county filter only on RAPIDS page
+  // Show county filter only on RAPIDS page; refresh dropdown in case data loaded since last visit
   document.getElementById('filter-group-county').style.display = id === 'rapids' ? '' : 'none';
+  if (id === 'rapids') updateRapidsCountyDropdown();
   // Hide area filter on RAPIDS page (no board-level data in RAPIDS)
   document.getElementById('filter-group-area').style.display = id === 'rapids' ? 'none' : '';
   // Hide entire filter bar on Methodology page
@@ -1776,36 +1790,109 @@ const RAPIDS_COUNTY_SAMPLE = {
   'IL': ['All IL Counties', 'Cook', 'DuPage', 'Will', 'Lake', 'McHenry', 'Kendall', 'Kane', 'DeKalb']
 };
 
-function updateRapidsCountyDropdown() {
-  const stateSelect = document.getElementById('filter-state');
-  const countySelect = document.getElementById('rapids-filter-county');
-  const selectedState = stateSelect?.value || 'All';
-  
-  // Get counties for the selected state — prefer live CSV data, fall back to sample
-  const counties = selectedState === 'All'
-    ? ['All Counties']
-    : (RAPIDS_COUNTY_LOOKUP?.[selectedState]
-        || RAPIDS_COUNTY_SAMPLE[selectedState]
-        || ['All Counties']);
-  
-  // Store current value
-  const currentValue = countySelect.value;
-  
-  // Clear and repopulate the county dropdown
-  countySelect.innerHTML = '';
-  counties.forEach(county => {
-    const option = document.createElement('option');
-    option.value = county;
-    option.textContent = county;
-    countySelect.appendChild(option);
-  });
-  
-  // Restore previous value if it still exists, otherwise default to "All"
-  if (counties.includes(currentValue)) {
-    countySelect.value = currentValue;
-  } else {
-    countySelect.value = counties[0];
+function toggleCountyDropdown(e) {
+  e.stopPropagation();
+  const dd = document.getElementById('county-ms-dropdown');
+  dd.style.display = dd.style.display === 'block' ? 'none' : 'block';
+}
+
+function getSelectedCounties() {
+  const cbs = document.querySelectorAll('#county-ms-dropdown .county-cb:not([value="__all__"])');
+  return Array.from(cbs).filter(cb => cb.checked).map(cb => cb.value);
+}
+
+function updateCountyTriggerLabel() {
+  const sel = getSelectedCounties();
+  const btn = document.getElementById('county-ms-trigger');
+  if (btn) {
+    btn.textContent = sel.length === 0 ? 'All Counties \u25be' : sel.length + ' selected \u25be';
+    btn.classList.toggle('has-value', sel.length > 0);
   }
+  renderCountyTags(sel);
+}
+
+function renderCountyTags(sel) {
+  const container = document.getElementById('county-tags');
+  if (!container) return;
+  if (!sel || sel.length === 0) { container.style.display = 'none'; container.innerHTML = ''; return; }
+  container.style.display = 'flex';
+  container.innerHTML = sel.map(c =>
+    `<span class="county-tag">${c}<button class="county-tag-remove" onclick="removeCountyTag('${c.replace(/'/g,"\\'")}')">&#x2715;</button></span>`
+  ).join('');
+}
+
+function removeCountyTag(county) {
+  const cb = Array.from(document.querySelectorAll('#county-ms-dropdown .county-cb')).find(c => c.value === county);
+  if (cb) { cb.checked = false; cb.dispatchEvent(new Event('change')); }
+}
+
+function makeCountyCheckboxItem(label, value, isAllOption) {
+  const item = document.createElement('div');
+  item.className = 'county-ms-item';
+  const cb = document.createElement('input');
+  cb.type = 'checkbox';
+  cb.className = 'county-cb';
+  cb.value = value;
+  cb.checked = isAllOption;
+  cb.addEventListener('change', function() {
+    if (isAllOption) {
+      document.querySelectorAll('#county-ms-dropdown .county-cb:not([value="__all__"])').forEach(c => { c.checked = false; });
+    } else {
+      const allCb = document.querySelector('#county-ms-dropdown .county-cb[value="__all__"]');
+      if (allCb) allCb.checked = false;
+    }
+    updateCountyTriggerLabel();
+    renderRapids();
+  });
+  const lbl = document.createElement('label');
+  lbl.textContent = label;
+  lbl.style.cssText = 'cursor:pointer;user-select:none';
+  item.appendChild(cb);
+  item.appendChild(lbl);
+  item.addEventListener('click', e => { if (e.target !== cb && e.target !== lbl) cb.click(); });
+  lbl.addEventListener('click', () => cb.click());
+  return item;
+}
+
+function updateRapidsCountyDropdown() {
+  const selectedState = document.getElementById('filter-state')?.value || 'All';
+  const btn = document.getElementById('county-ms-trigger');
+
+  // Get raw county list, strip the synthetic 'All Counties' entry added by the loader
+  let rawCounties = selectedState === 'All'
+    ? []
+    : (RAPIDS_COUNTY_LOOKUP?.[selectedState] || RAPIDS_COUNTY_SAMPLE[selectedState] || []);
+  const counties = rawCounties.filter(c => c !== 'All Counties');
+
+  const dropdown = document.getElementById('county-ms-dropdown');
+  if (!dropdown) return;
+  dropdown.innerHTML = '';
+
+  if (counties.length === 0) {
+    // No data yet or national view — disable button
+    if (btn) {
+      btn.textContent = selectedState === 'All' ? 'Select a state first \u25be' : 'Loading counties\u2026';
+      btn.disabled = true;
+      btn.style.opacity = '0.5';
+      btn.style.cursor = 'not-allowed';
+    }
+    return;
+  }
+
+  // Re-enable button
+  if (btn) {
+    btn.disabled = false;
+    btn.style.opacity = '';
+    btn.style.cursor = '';
+  }
+
+  dropdown.appendChild(makeCountyCheckboxItem('All Counties (State Total)', '__all__', true));
+  const div = document.createElement('div');
+  div.className = 'county-ms-divider';
+  dropdown.appendChild(div);
+  counties.forEach(county => dropdown.appendChild(makeCountyCheckboxItem(county, county, false)));
+
+  updateCountyTriggerLabel();
 }
 
 function setRapidsType(type, btn) {
@@ -1823,8 +1910,8 @@ function renderRapids() {
     return;
   }
   const globalState = document.getElementById('filter-state')?.value || 'All';
-  const selectedCounty = document.getElementById('rapids-filter-county')?.value || 'All';
-  
+  const selectedCounties = getSelectedCounties();
+
   // Map abbr → full state name for RAPIDS lookup
   const stateAbbr = globalState === 'All' ? '__all__' : globalState;
   const stateVal = stateAbbr === '__all__' ? '__all__'
@@ -1837,11 +1924,11 @@ function renderRapids() {
   const PY_LABELS = ['(PY 2021)', '(PY 2022)', '(PY 2023)', '(PY 2024)'];
 
   // Filter data
-  const countySelected = selectedCounty && selectedCounty !== 'All' && selectedCounty !== 'All Counties';
+  const countySelected = selectedCounties.length > 0 && RAPIDS_COUNTY_DATA;
 
   let filtered;
   if (stateVal === '__all__') {
-    // National aggregate â€” county filter not applicable
+    // National aggregate — county filter not applicable
     filtered = FYS.map(fy => {
       const rows = RAPIDS_STATE_DATA.filter(r => r.fy === fy && r.type === rapidsType && r.abbr !== 'USMAP' && r.County === '* State Total');
       const totalCount = rows.reduce((s, r) => s + (r.count || 0), 0);
@@ -1849,11 +1936,18 @@ function renderRapids() {
       const avgWage = wageRows.length ? wageRows.reduce((s,r) => s + r.avgWage, 0) / wageRows.length : null;
       return { fy, count: totalCount, avgWage: avgWage ? Math.round(avgWage * 100) / 100 : null };
     });
-  } else if (countySelected && RAPIDS_COUNTY_DATA) {
-    // County-level data
+  } else if (countySelected) {
+    // Aggregate across selected counties (count-weighted average wage)
     filtered = FYS.map(fy => {
-      const row = RAPIDS_COUNTY_DATA.find(r => r.fy === fy && r.abbr === stateAbbr && r.County === selectedCounty && r.type === rapidsType);
-      return { fy, count: row ? row.count : null, avgWage: row ? row.avgWage : null };
+      const rows = RAPIDS_COUNTY_DATA.filter(r =>
+        r.fy === fy && r.abbr === stateAbbr && selectedCounties.includes(r.County) && r.type === rapidsType
+      );
+      const totalCount = rows.reduce((s, r) => s + (r.count || 0), 0);
+      const wageRows = rows.filter(r => r.avgWage != null && r.count > 0);
+      const avgWage = wageRows.length
+        ? wageRows.reduce((s, r) => s + r.avgWage * r.count, 0) / wageRows.reduce((s, r) => s + r.count, 0)
+        : null;
+      return { fy, count: totalCount || null, avgWage: avgWage ? Math.round(avgWage * 100) / 100 : null };
     });
   } else {
     // State total
